@@ -43,7 +43,7 @@ jobs:
           npm install
 
           npm run prisma:generate
-          
+
           # 2️⃣ Compila TypeScript (index.js junto a cada function.json)
           npm run build
 
@@ -65,7 +65,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: functionapp-src
-          path: ${{ env.FUNC_SRC }}          # sube TODO src/ (incluye carpetas ocultas)
+          path: ${{ env.FUNC_SRC }}  
+          include-hidden-files: true    
+          if-no-files-found: error        # sube TODO src/ (incluye carpetas ocultas)
 
 # ───────────────────────────────────────────
 # 2) DEPLOY – verifica que el artefacto trae
