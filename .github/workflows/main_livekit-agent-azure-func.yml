@@ -1,5 +1,5 @@
-# Docs for the Azure Web Apps Deploy action: https://github.com/azure/functions-action
-# More GitHub Actions for Azure: https://github.com/Azure/actions
+# Docs for the Azure Functions Deploy action: https://github.com/azure/functions-action
+# More GitHub Actions for Azure:       https://github.com/Azure/actions
 
 name: Build and deploy Node.js project to Azure Function App - livekit-agent-azure-func
 
@@ -10,64 +10,76 @@ on:
   workflow_dispatch:
 
 env:
-  AZURE_FUNCTIONAPP_PACKAGE_PATH: '.' # set this to the path to your web app project, defaults to the repository root
-  NODE_VERSION: '20.x' # set this to the node version to use (supports 8.x, 10.x, 12.x)
+  AZURE_FUNCTIONAPP_PACKAGE_PATH: 'src'   # publicamos todo src/ como wwwroot
+  NODE_VERSION: '20.x'                    # Node version
 
 jobs:
   build:
     runs-on: windows-latest
     permissions:
-      contents: read #This is required for actions/checkout
-      
+      contents: read
+
+    # pasamos la cadena de conexión para migrate:deploy
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
     steps:
-      - name: 'Checkout GitHub Action'
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node ${{ env.NODE_VERSION }} Environment
+      - name: Setup Node ${{ env.NODE_VERSION }}
         uses: actions/setup-node@v3
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: 'Resolve Project Dependencies Using Npm'
+      - name: Install, Prisma & Build
         shell: pwsh
         run: |
-          pushd './${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}'
+          pushd ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
+
+          # 1️⃣ Instala dependencias
           npm install
-          npm run build --if-present
-          npm run test --if-present
+
+          # 2️⃣ Genera Prisma Client
+          npm run prisma:generate
+
+          # 3️⃣ Aplica migraciones
+          npm run migrate:deploy
+
+          # 4️⃣ Compila TS → JS
+          npm run build
+
           popd
 
-      - name: Upload artifact for deployment job
+      - name: Upload artifact for deploy
         uses: actions/upload-artifact@v4
         with:
-          name: node-app
-          path: .
+          name: functionapp-src
+          path: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
 
   deploy:
     runs-on: windows-latest
     needs: build
     permissions:
-      id-token: write #This is required for requesting the JWT
-      contents: read #This is required for actions/checkout
+      id-token: write
+      contents: read
 
     steps:
-      - name: Download artifact from build job
+      - name: Download artifact
         uses: actions/download-artifact@v4
         with:
-          name: node-app
-      
+          name: functionapp-src
+
       - name: Login to Azure
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_B9CC5E7DD4CD4EBF84F817C7243AC885 }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_47BEC7C0624B42299932C78F6C01DF57 }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_80E5F5856F2F46CFB7B591B7CD076727 }}
+          client-id:        ${{ secrets.AZUREAPPSERVICE_CLIENTID_B9CC5E7DD4CD4EBF84F817C7243AC885 }}
+          tenant-id:        ${{ secrets.AZUREAPPSERVICE_TENANTID_47BEC7C0624B42299932C78F6C01DF57 }}
+          subscription-id:  ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_80E5F5856F2F46CFB7B591B7CD076727 }}
 
-      - name: 'Run Azure Functions Action'
+      - name: Deploy to Azure Functions
         uses: Azure/functions-action@v1
-        id: fa
         with:
-          app-name: 'livekit-agent-azure-func'
-          slot-name: 'Production'
-          package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
-          
+          app-name:   'livekit-agent-azure-func'
+          slot-name:  'Production'
+          package:    ${{ github.workspace }}/functionapp-src
