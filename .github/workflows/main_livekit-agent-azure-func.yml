@@ -1,15 +1,22 @@
-name: Build and deploy Node.js project to Azure Function App - livekit-agent-azure-func
+# ===========================================
+# Build and deploy Node.js Azure Function App
+# ===========================================
+
+name: Build and deploy – livekit-agent-azure-func
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
   workflow_dispatch:
 
 env:
-  AZURE_FUNCTIONAPP_PACKAGE_PATH: 'src'
-  NODE_VERSION: '20.x'
+  FUNC_SRC:  src          # carpeta que contiene host.json, package.json, node_modules, etc.
+  NODE_VER:  '20.x'
 
+# ───────────────────────────────────────────
+# 1) BUILD – compila, genera Prisma Client y
+#            crea artefacto listo para ZIP-deploy
+# ───────────────────────────────────────────
 jobs:
   build:
     runs-on: windows-latest
@@ -17,61 +24,76 @@ jobs:
       contents: read
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Setup Node ${{ env.NODE_VER }}
         uses: actions/setup-node@v3
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version: ${{ env.NODE_VER }}
 
-      - name: Install, Prisma & Build
+      - name: Install deps, build & Prisma
         shell: pwsh
         run: |
-          pushd ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
+          pushd ${{ env.FUNC_SRC }}
 
+          # 1️⃣ Dependencias
           npm install
-          npm run prisma:generate
-          npm run build
-  
 
+          npm run prisma:generate
+          
+          # 2️⃣ Compila TypeScript (index.js junto a cada function.json)
+          npm run build
+
+          # 3️⃣ Genera Prisma Client
+
+          # 4️⃣ Verificación: debe existir node_modules/.prisma/client
           if (-Not (Test-Path ".\node_modules\.prisma\client")) {
-            Write-Error "❌ Prisma Client no se generó"
+            Write-Error "❌ Prisma Client no se generó en node_modules/.prisma/client"
             exit 1
           }
+          Write-Host "✅ Prisma Client presente"
 
+          # 5️⃣ Aplica migraciones
           npm run migrate:deploy
+
           popd
 
-      - name: Upload artifact for deploy
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: functionapp-src
-          path: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}   # <– sube todo src/, incluidas carpetas ocultas
+          path: ${{ env.FUNC_SRC }}          # sube TODO src/ (incluye carpetas ocultas)
 
+# ───────────────────────────────────────────
+# 2) DEPLOY – verifica que el artefacto trae
+#             Prisma Client y lo publica
+# ───────────────────────────────────────────
   deploy:
     runs-on: windows-latest
     needs: build
     permissions:
       id-token: write
       contents: read
+
     steps:
       - name: Download artifact
         uses: actions/download-artifact@v4
         with:
           name: functionapp-src
-          path: functionapp-src
+          path: functionapp-src               # queda en ./functionapp-src
 
-      - name: Verify Prisma client in artifact
+      - name: Verificar Prisma en artefacto
         shell: pwsh
         run: |
-          $p = "functionapp-src\${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}\node_modules\.prisma\client"
+          $p = "functionapp-src\node_modules\.prisma\client"
           if (-Not (Test-Path $p)) {
             Write-Error "❌ Prisma Client no viaja en el artifact ($p)"
             exit 1
           }
-          Write-Host "✅ Prisma Client OK"
+          Write-Host "✅ Prisma Client presente en artifact"
 
       - name: Login to Azure
         uses: azure/login@v2
@@ -83,8 +105,8 @@ jobs:
       - name: Deploy to Azure Functions
         uses: Azure/functions-action@v1
         with:
-          app-name:                       'livekit-agent-azure-func'
-          slot-name:                      'Production'
-          package:                        '${{ github.workspace }}/functionapp-src/${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}'
-          scm-do-build-during-deployment: false
+          app-name:                       livekit-agent-azure-func
+          slot-name:                      Production
+          package:                        '${{ github.workspace }}/functionapp-src'
+          scm-do-build-during-deployment: false   # se despliega tal cual
           respect-funcignore:             true
