@@ -23,7 +23,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node ${{ env.NODE_VERSION }}
+      - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -37,7 +37,6 @@ jobs:
           npm run build
           npm run prisma:generate
 
-          # Verifico que el cliente Prisma exista
           if (-Not (Test-Path ".\node_modules\.prisma\client")) {
             Write-Error "❌ Prisma Client no se generó en node_modules/.prisma/client"
             exit 1
@@ -51,7 +50,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: functionapp-src
-          path: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
+          # Subimos TODO bajo src/, incluida la carpeta node_modules/.prisma
+          path: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}/**
 
   deploy:
     runs-on: windows-latest
@@ -70,8 +70,9 @@ jobs:
       - name: Verify Prisma client in artifact
         shell: pwsh
         run: |
-          if (-Not (Test-Path "functionapp-src\node_modules\.prisma\client")) {
-            Write-Error "❌ Prisma Client no viaja en el artifact"
+          $prismaPath = "functionapp-src\${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}\node_modules\.prisma\client"
+          if (-Not (Test-Path $prismaPath)) {
+            Write-Error "❌ Prisma Client no está en el artifact ($prismaPath)"
             exit 1
           }
           Write-Host "✅ Prisma Client presente en artifact"
@@ -88,6 +89,7 @@ jobs:
         with:
           app-name:                       'livekit-agent-azure-func'
           slot-name:                      'Production'
-          package:                        '${{ github.workspace }}/functionapp-src'
+          # Ahora apuntamos al sub-directorio src dentro del artifact
+          package:                        '${{ github.workspace }}/functionapp-src/${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}'
           scm-do-build-during-deployment: false
           respect-funcignore:             true
