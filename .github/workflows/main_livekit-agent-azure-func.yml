@@ -83,3 +83,5 @@ jobs:
           app-name:  'livekit-agent-azure-func'
           slot-name: 'Production'
           package:   '${{ github.workspace }}/functionapp-src'
+          enable-oryx-build: true
+          respect-funcignore: true
