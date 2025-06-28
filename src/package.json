@@ -6,6 +6,8 @@
     "prisma:generate": "prisma generate",
     "migrate:deploy": "prisma migrate deploy",
     "prepare": "npm run prisma:generate",
+    "postinstall":     "npm run prepare",   
+    "postbuild":       "npm run prepare", 
     "start":            "func start --script-root ."
   },
   "dependencies": {
