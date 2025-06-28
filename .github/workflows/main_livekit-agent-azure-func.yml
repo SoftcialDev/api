@@ -19,7 +19,6 @@ jobs:
     permissions:
       contents: read
 
-    # pasamos la cadena de conexión para migrate:deploy
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
@@ -69,17 +68,18 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: functionapp-src
+          path: functionapp-src
 
       - name: Login to Azure
         uses: azure/login@v2
         with:
-          client-id:        ${{ secrets.AZUREAPPSERVICE_CLIENTID_B9CC5E7DD4CD4EBF84F817C7243AC885 }}
-          tenant-id:        ${{ secrets.AZUREAPPSERVICE_TENANTID_47BEC7C0624B42299932C78F6C01DF57 }}
-          subscription-id:  ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_80E5F5856F2F46CFB7B591B7CD076727 }}
+          client-id:       ${{ secrets.AZUREAPPSERVICE_CLIENTID_B9CC5E7DD4CD4EBF84F817C7243AC885 }}
+          tenant-id:       ${{ secrets.AZUREAPPSERVICE_TENANTID_47BEC7C0624B42299932C78F6C01DF57 }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_80E5F5856F2F46CFB7B591B7CD076727 }}
 
       - name: Deploy to Azure Functions
         uses: Azure/functions-action@v1
         with:
-          app-name:   'livekit-agent-azure-func'
-          slot-name:  'Production'
-          package:    ${{ github.workspace }}/functionapp-src
+          app-name:  'livekit-agent-azure-func'
+          slot-name: 'Production'
+          package:   '${{ github.workspace }}/functionapp-src'
