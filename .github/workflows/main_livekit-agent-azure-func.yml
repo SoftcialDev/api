@@ -15,10 +15,8 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: read
-
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -34,14 +32,14 @@ jobs:
           pushd ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
 
           npm install
-          npm run build
           npm run prisma:generate
+          npm run build
+  
 
           if (-Not (Test-Path ".\node_modules\.prisma\client")) {
-            Write-Error "❌ Prisma Client no se generó en node_modules/.prisma/client"
+            Write-Error "❌ Prisma Client no se generó"
             exit 1
           }
-          Write-Host "✅ Prisma Client OK"
 
           npm run migrate:deploy
           popd
@@ -50,8 +48,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: functionapp-src
-          # Subimos TODO bajo src/, incluida la carpeta node_modules/.prisma
-          path: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}/**
+          path: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}   # <– sube todo src/, incluidas carpetas ocultas
 
   deploy:
     runs-on: windows-latest
@@ -59,7 +56,6 @@ jobs:
     permissions:
       id-token: write
       contents: read
-
     steps:
       - name: Download artifact
         uses: actions/download-artifact@v4
@@ -70,12 +66,12 @@ jobs:
       - name: Verify Prisma client in artifact
         shell: pwsh
         run: |
-          $prismaPath = "functionapp-src\${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}\node_modules\.prisma\client"
-          if (-Not (Test-Path $prismaPath)) {
-            Write-Error "❌ Prisma Client no está en el artifact ($prismaPath)"
+          $p = "functionapp-src\${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}\node_modules\.prisma\client"
+          if (-Not (Test-Path $p)) {
+            Write-Error "❌ Prisma Client no viaja en el artifact ($p)"
             exit 1
           }
-          Write-Host "✅ Prisma Client presente en artifact"
+          Write-Host "✅ Prisma Client OK"
 
       - name: Login to Azure
         uses: azure/login@v2
@@ -89,7 +85,6 @@ jobs:
         with:
           app-name:                       'livekit-agent-azure-func'
           slot-name:                      'Production'
-          # Ahora apuntamos al sub-directorio src dentro del artifact
           package:                        '${{ github.workspace }}/functionapp-src/${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}'
           scm-do-build-during-deployment: false
           respect-funcignore:             true
