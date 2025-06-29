@@ -82,7 +82,4 @@ jobs:
       - name: Zip-deploy to Azure Function
         shell: pwsh
         run: |
-          az functionapp deployment source config-zip \
-            --resource-group livekit-agent-azure \
-            --name livekit-agent-azure-func \
-            --src "$(System.DefaultWorkingDirectory)/deploy.zip"
+               az functionapp deployment source config-zip --resource-group livekit-agent-azure --name livekit-agent-azure-func --src "$(System.DefaultWorkingDirectory)/deploy.zip"
