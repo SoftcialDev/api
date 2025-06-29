@@ -16,6 +16,7 @@ jobs:
       contents: read
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -28,39 +29,50 @@ jobs:
       - name: Install deps, build & Prisma
         shell: pwsh
         run: |
-          pushd ${{ env.FUNC_SRC }}
+          Push-Location ${{ env.FUNC_SRC }}
           npm install
           npm run build
           npm run prisma:generate
           if (-Not (Test-Path ".\node_modules\.prisma\client")) {
             Write-Error "❌ No se generó Prisma Client"
-            exit 1
+            Exit 1
           }
           npm run migrate:deploy
-          popd
+          Pop-Location
 
       - name: Create deploy ZIP
         shell: pwsh
         run: |
+          # Borra ZIP previo si existe
           Remove-Item -Force ../deploy.zip -ErrorAction Ignore
+          # Empaqueta solo el contenido de src/, sin carpeta raíz
           Compress-Archive -Path ${{ env.FUNC_SRC }}\* -DestinationPath ../deploy.zip -Force
 
       - name: Validate ZIP structure
         shell: pwsh
         run: |
+          # Extrae temporalmente para comprobaciones
+          Remove-Item -Recurse -Force ../zip-temp -ErrorAction Ignore
           Expand-Archive -Path ../deploy.zip -DestinationPath ../zip-temp -Force
+
+          # 1) Debe existir host.json en la raíz
           if (-Not (Test-Path "../zip-temp/host.json")) {
             Write-Error "❌ Falta host.json en el ZIP"
-            exit 1
+            Exit 1
           }
+
+          # 2) No debe existir carpeta zip-temp/src
           if (Test-Path "../zip-temp/src") {
             Write-Error "❌ ZIP contiene carpeta src/ en lugar de su contenido"
-            exit 1
+            Exit 1
           }
+
+          # 3) Debe contener node_modules/.prisma/client
           if (-Not (Test-Path "../zip-temp/node_modules/.prisma/client")) {
             Write-Error "❌ Falta node_modules/.prisma/client en el ZIP"
-            exit 1
+            Exit 1
           }
+
           Write-Host "✅ ZIP structure OK"
           Remove-Item -Recurse -Force ../zip-temp
 
@@ -81,5 +93,4 @@ jobs:
 
       - name: Zip-deploy to Azure Function
         shell: pwsh
-        run: |
-               az functionapp deployment source config-zip --resource-group livekit-agent-azure --name livekit-agent-azure-func --src "$(System.DefaultWorkingDirectory)/deploy.zip"
+        run: az functionapp deployment source config-zip --resource-group livekit-agent-azure --name livekit-agent-azure-func --src "./deploy.zip"
