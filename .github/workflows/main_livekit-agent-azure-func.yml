@@ -1,33 +1,34 @@
-name: Build, zip & deploy – livekit-agent-azure-func
+name: Build, Zip & Deploy – livekit-agent-azure-func
 
 on:
   push:
     branches: [ main ]
+    paths:
+      - 'apps/api-functions/**'
+      - '.github/workflows/main_livekit-agent-azure-func.yml'
   workflow_dispatch:
 
 env:
-  FUNC_SRC: src
+  FUNC_SRC: apps/api-functions
   NODE_VER: '20.x'
 
 jobs:
-  build-and-deploy:
+  build:
     runs-on: windows-latest
     permissions:
       contents: read
-      id-token: write    # needed for azure/login
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
-
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js ${{ env.NODE_VER }}
+      - name: Set up Node.js ${{ env.NODE_VER }}
         uses: actions/setup-node@v3
         with:
           node-version: ${{ env.NODE_VER }}
 
-      - name: Install deps, build & Prisma
+      - name: Install deps, build & generate Prisma client
         shell: pwsh
         run: |
           Push-Location ${{ env.FUNC_SRC }}
@@ -35,42 +36,59 @@ jobs:
           npm run build
           npm run prisma:generate
           if (-Not (Test-Path ".\node_modules\.prisma\client")) {
-            Write-Error "❌ No se generó Prisma Client"
+            Write-Error "❌ Prisma Client was not generated"
             Exit 1
           }
           npm run migrate:deploy
           Pop-Location
 
-      - name: Create deploy ZIP
+      - name: Package deployable ZIP
         shell: pwsh
         run: |
           Remove-Item -Force deploy.zip -ErrorAction Ignore
           Compress-Archive -Path ${{ env.FUNC_SRC }}\* -DestinationPath deploy.zip -Force
 
-      - name: Validate ZIP structure
+      - name: Validate ZIP contents
         shell: pwsh
         run: |
           Remove-Item -Recurse -Force zip-temp -ErrorAction Ignore
           Expand-Archive -Path deploy.zip -DestinationPath zip-temp -Force
-          if (-Not (Test-Path "zip-temp/host.json"))       { Write-Error "❌ Falta host.json";       Exit 1 }
-          if (Test-Path "zip-temp/src")                    { Write-Error "❌ ZIP contiene carpeta src"; Exit 1 }
-          if (-Not (Test-Path "zip-temp/node_modules/.prisma/client")) {
-            Write-Error "❌ Falta .prisma/client"; Exit 1
+          if (-Not (Test-Path "zip-temp/host.json")) {
+            Write-Error "❌ host.json is missing in ZIP root"
+            Exit 1
           }
-          Write-Host "✅ ZIP structure OK"
+          if (Test-Path "zip-temp/apps/api-functions") {
+            Write-Error "❌ ZIP contains nested apps/api-functions folder"
+            Exit 1
+          }
+          if (-Not (Test-Path "zip-temp/node_modules/.prisma/client")) {
+            Write-Error "❌ node_modules/.prisma/client is missing in ZIP"
+            Exit 1
+          }
+          Write-Host "✅ ZIP structure is valid"
           Remove-Item -Recurse -Force zip-temp
 
-      - name: Login to Azure
-        uses: azure/login@v2
-        with:
-          client-id:       ${{ secrets.AZUREAPPSERVICE_CLIENTID_B9CC5E7DD4CD4EBF84F817C7243AC885 }}
-          tenant-id:       ${{ secrets.AZUREAPPSERVICE_TENANTID_47BEC7C0624B42299932C78F6C01DF57 }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_80E5F5856F2F46CFB7B591B7CD076727 }}
-
-      - name: Zip-deploy to Azure Function
+  deploy:
+    runs-on: windows-latest
+    needs: build
+    permissions:
+      contents: read
+    steps:
+      - name: Find deploy.zip in workspace
         shell: pwsh
         run: |
-          az functionapp deployment source config-zip `
-            --resource-group livekit-agent-azure `
-            --name livekit-agent-azure-func `
-            --src "./deploy.zip"
+          $zip = Get-ChildItem -Path $Env:GITHUB_WORKSPACE -Filter deploy.zip -Recurse |
+                 Select-Object -First 1 -ExpandProperty FullName
+          if (-Not (Test-Path $zip)) {
+            Write-Error "❌ deploy.zip not found in workspace"
+            Exit 1
+          }
+          Write-Host "📦 Deploying ZIP at path: $zip"
+
+      - name: Deploy ZIP with publish-profile
+        uses: Azure/functions-action@v1
+        with:
+          app-name:        livekit-agent-azure-func
+          slot-name:       Production
+          package:         ${{ steps.find.outputs.zipPath || '$zip' }}
+          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_FF8DCA89135F49D0BAFC08A0152A293C }}
