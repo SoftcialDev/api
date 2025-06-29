@@ -1,4 +1,4 @@
-name: Build and deploy – livekit-agent-azure-func
+name: Build, zip & deploy – livekit-agent-azure-func
 
 on:
   push:
@@ -17,13 +17,15 @@ jobs:
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v3
+      - name: Setup Node.js ${{ env.NODE_VER }}
+        uses: actions/setup-node@v3
         with:
           node-version: ${{ env.NODE_VER }}
 
-      - name: Install, build & Prisma
+      - name: Install deps, build & Prisma
         shell: pwsh
         run: |
           pushd ${{ env.FUNC_SRC }}
@@ -37,13 +39,30 @@ jobs:
           npm run migrate:deploy
           popd
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: functionapp-src
-          path: ${{ env.FUNC_SRC }}
-          include-hidden-files: true
-          if-no-files-found: error
+      - name: Create deploy ZIP
+        shell: pwsh
+        run: |
+          Remove-Item -Force ../deploy.zip -ErrorAction Ignore
+          Compress-Archive -Path ${{ env.FUNC_SRC }}\* -DestinationPath ../deploy.zip -Force
+
+      - name: Validate ZIP structure
+        shell: pwsh
+        run: |
+          Expand-Archive -Path ../deploy.zip -DestinationPath ../zip-temp -Force
+          if (-Not (Test-Path "../zip-temp/host.json")) {
+            Write-Error "❌ Falta host.json en el ZIP"
+            exit 1
+          }
+          if (Test-Path "../zip-temp/src") {
+            Write-Error "❌ ZIP contiene carpeta src/ en lugar de su contenido"
+            exit 1
+          }
+          if (-Not (Test-Path "../zip-temp/node_modules/.prisma/client")) {
+            Write-Error "❌ Falta node_modules/.prisma/client en el ZIP"
+            exit 1
+          }
+          Write-Host "✅ ZIP structure OK"
+          Remove-Item -Recurse -Force ../zip-temp
 
   deploy:
     runs-on: windows-latest
@@ -53,31 +72,17 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: functionapp-src
-          path: functionapp-src
-
-      - name: Verify Prisma in artifact
-        shell: pwsh
-        run: |
-          if (-Not (Test-Path "functionapp-src\node_modules\.prisma\client")) {
-            Write-Error "❌ Prisma Client no viajó en el artifact"
-            exit 1
-          }
-
-      - name: Login to Azure
+      - name: Azure CLI Login
         uses: azure/login@v2
-        with:                            # ← debe ir aquí, no bajo 'env'
+        with:
           client-id:       ${{ secrets.AZUREAPPSERVICE_CLIENTID_B9CC5E7DD4CD4EBF84F817C7243AC885 }}
           tenant-id:       ${{ secrets.AZUREAPPSERVICE_TENANTID_47BEC7C0624B42299932C78F6C01DF57 }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_80E5F5856F2F46CFB7B591B7CD076727 }}
 
-      - name: Deploy to Azure Functions
-        uses: Azure/functions-action@v1
-        with:
-          app-name:                       livekit-agent-azure-func
-          slot-name:                      Production
-          package:                        '${{ github.workspace }}/functionapp-src'
-          scm-do-build-during-deployment: false
-          respect-funcignore:             true
+      - name: Zip-deploy to Azure Function
+        shell: pwsh
+        run: |
+          az functionapp deployment source config-zip \
+            --resource-group livekit-agent-azure \
+            --name livekit-agent-azure-func \
+            --src "$(System.DefaultWorkingDirectory)/deploy.zip"
